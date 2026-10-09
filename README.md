@@ -187,8 +187,7 @@ ruff format --check .
 ```
 
 Tests cover the custom reward logic, episode boundaries, configs, run directories,
-and restoring checkpoints. GitHub Actions runs these checks too. Use `--smoke` to
-check training with the actual emulator.
+and restoring checkpoints. Use `--smoke` to check training with the actual emulator.
 
 ## Experiments
 
