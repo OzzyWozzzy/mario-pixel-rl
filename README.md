@@ -1,23 +1,25 @@
 # Mario Pixel RL
 
-A student reinforcement learning project that trains a visual agent to play **Super Mario Bros.** using PPO, with optional curiosity and collection rewards.
+Training an agent to play **Super Mario Bros.** from pixels using PPO.
 
-The project explores how reward design changes what an agent learns: progressing through a level, collecting points and coins, or visiting unfamiliar states. PPO optimization is provided by **Stable-Baselines3**. The custom work covers the environment wrappers, reward shaping, RND integration, experiment records, and evaluation tools.
+I built this project to explore how rewards affect what an agent learns. Does it keep moving through the level, stop to collect coins, or explore somewhere new? It uses **Stable-Baselines3** for PPO. My work is in the environment wrappers, reward shaping, curiosity with Random Network Distillation (RND), and tools for running and comparing experiments.
 
 ## Trained gameplay
 
-Historical agents trained for millions of transitions cleared stage 1-1 and reached
-stage 1-2. The strongest archived recording shows a game score of 28,050.
+The older training runs got through stage 1-1 and into stage 1-2. The highest-scoring
+saved recording finished with 28,050 points.
 
 ![Historical stage 1-2 gameplay](results/historical/gameplay.gif)
 
-Fresh checkpoint evaluations are documented in [the historical results](results/historical/README.md).
-These demonstrate trained gameplay. The short PPO-versus-RND pilot below checks a
-separate experiment workflow.
+I re-evaluated the saved checkpoints and put the numbers in [the historical results](results/historical/README.md).
+They show what the trained agents can do, though none of these evaluations reached
+stage 1-3. The PPO-versus-RND comparison below is a separate, much shorter run.
 
 ## Approach
 
-The policy sees only rendered images. Game-state fields are used for evaluation and, when enabled, collection and coverage rewards. This is visual control with optional state-informed rewards.
+The agent chooses actions from images alone. When collection or coverage rewards
+are enabled, the reward wrappers also use game-state information such as coins and
+position. Evaluation uses those fields to track progress too.
 
 ```mermaid
 flowchart LR
@@ -36,11 +38,16 @@ flowchart LR
 - **Coverage:** a bonus for entering a new 16-pixel spatial cell within an episode.
 - **RND:** prediction error against a frozen random network encourages unfamiliar visual states.
 
-The RND implementation uses online predictor updates and a single PPO value head for the combined reward. It is a simplified implementation, rather than a reproduction of every detail in the original paper. See [the algorithm guide](docs/RL_ALGORITHM.md) for equations, wrapper ordering, and implementation details.
+This version of RND updates its predictor at each vector step and uses one PPO value
+head for the combined reward. It doesn't reproduce every detail of the original
+paper. [The algorithm notes](docs/RL_ALGORITHM.md) explain the equations and how the
+wrappers fit together.
 
 ## Setup
 
-The pinned environment stack requires **Python 3.13 or later**. A clean installation, tests, and emulator integration checks have been run on macOS Apple Silicon with Python 3.13. On macOS, building `nes-py` may require Xcode Command Line Tools.
+Use **Python 3.13 or later** for the pinned dependencies. I've tested installation
+and short training runs on macOS Apple Silicon with Python 3.13. On macOS, you may
+need Xcode Command Line Tools to build `nes-py`.
 
 With [uv](https://docs.astral.sh/uv/):
 
@@ -58,11 +65,12 @@ source .venv/bin/activate
 python -m pip install -e '.[dev]'
 ```
 
-This repository does not include ROM files. The registered environments are supplied by `gym-super-mario-bros`. Review that package's assets and licensing before using or distributing them.
+The Mario environment comes from `gym-super-mario-bros`. This repo doesn't contain
+ROM files. See that package for its assets and licensing.
 
 ## Train
 
-Start with a short pipeline check:
+Start with a short run to check that everything works:
 
 ```bash
 python -m src.train --config configs/ppo_world1_1.yaml --smoke
@@ -70,14 +78,16 @@ python -m src.train --config configs/ppo_world1_1.yaml --smoke
 
 Smoke runs use separate directories under `runs/ppo_world1_1/smoke/`. Normal runs get timestamped directories under `runs/ppo_world1_1/experiments/`. Each run contains its resolved configuration, metadata, checkpoints, evaluation logs, and final model.
 
-For an explicit experiment directory:
+To choose where a run is saved:
 
 ```bash
 python -m src.train --config configs/ppo_world1_1.yaml \
   --run-dir runs/baseline_seed0
 ```
 
-Fresh training refuses to overwrite a nonempty run directory. Change the seed and settings in YAML for another experiment. `total_timesteps` counts agent transitions across all environments, rather than raw emulator frames.
+Training won't overwrite an existing run. You can change the seed and settings in
+YAML for another experiment. `total_timesteps` counts agent transitions across all
+environments, not raw emulator frames.
 
 | Configuration | Environment | Reward additions | Actions |
 |---|---|---|---|
@@ -87,7 +97,8 @@ Fresh training refuses to overwrite a nonempty run directory. Change the seed an
 | `ppo_fullgame.yaml` | Continuous stages | Collection + coverage + RND | 7 |
 | `ppo_explore.yaml` | Continuous stages | Collection + coverage + RND | 12 |
 
-The legacy `humanlike` configuration flag enables collection rewards. Human-like behavior has not been established experimentally.
+The older configs call the collection reward flag `humanlike`. It adds collection
+bonuses, but the name isn't a claim that the agent behaves like a person.
 
 ### Resume and transfer
 
@@ -102,9 +113,15 @@ python -m src.train --config configs/ppo_human_1_2.yaml \
   --run-dir runs/transfer_1_2
 ```
 
-Resume restores saved PPO settings and optimizer state. The requested YAML and actual PPO settings are recorded separately in metadata. Curiosity-enabled checkpoints also require their matching `.rnd.pt` file. Older checkpoints without that file can be used to warm-start a fresh run.
+Resume restores the saved PPO settings and optimizer. The run metadata records both
+the requested YAML and the settings actually used. If the run uses curiosity, keep
+the matching `.rnd.pt` file with each checkpoint. Older checkpoints without it can
+still provide starting weights for a new run.
 
-`--transfer-from` copies only tensors with matching names and shapes, supporting changes such as a larger action space. Matching tensor shapes do not guarantee matching action meanings. Neither resume nor transfer restores emulator state or promises an identical continuation trajectory.
+For changes such as a larger action space, `--transfer-from` copies tensors with
+matching names and shapes. Check that the action meanings still make sense.
+Resuming starts new emulator episodes, so it won't replay the exact continuation
+of the original run.
 
 ## Evaluate and watch
 
@@ -123,9 +140,16 @@ python -m src.autorecord --config runs/baseline_seed0/config.yaml \
   --run-dir runs/baseline_seed0 --top-k 10 --episodes 3
 ```
 
-Evaluation reports extrinsic return, episode length, game score, coins collected, spatial coverage when enabled, and stage progression. It excludes RND rewards. By default it uses deterministic actions and writes JSON beside the model. `--stochastic` samples actions. Video playback defaults to `60 / frame_skip` frames per second.
+Evaluation saves return, episode length, score, coins, stage progression, and
+coverage when enabled. It leaves out curiosity rewards. By default, the agent takes
+its most likely action and the results go in a JSON file beside the model. Add
+`--stochastic` to sample actions instead. Videos play at `60 / frame_skip` frames
+per second.
 
-The callback selects the best checkpoint by mean configured extrinsic return. Returns from different reward configurations are **not directly comparable**. Use completion and game-score metrics for behavioral comparisons. In a full-game run, “any stage cleared” does not mean the whole game was completed, and maximum horizontal position is stage-local.
+The best checkpoint is chosen by average return without curiosity. Because reward
+settings change that return, use stage completion and game score when comparing
+agents trained with different rewards. A stage clear means one stage was cleared,
+and horizontal position is measured within a stage.
 
 For learning curves:
 
@@ -151,7 +175,7 @@ src/
   autorecord.py   Score-ranked gameplay recordings
 configs/          Experiment configurations
 tests/            Tests for custom logic using small fake environments
-docs/             Algorithm details and development plan
+docs/             Algorithm notes and experiment protocol
 ```
 
 ## Development
@@ -162,13 +186,15 @@ ruff check .
 ruff format --check .
 ```
 
-Tests cover episode boundaries, collection rewards, coverage reset, configuration validation, run isolation, resume guards, RND restoration, and warm-start/resume behavior. The GitHub workflow runs these checks. Emulator training is checked separately with `--smoke`.
+Tests cover the custom reward logic, episode boundaries, configs, run directories,
+and restoring checkpoints. GitHub Actions runs these checks too. Use `--smoke` to
+check training with the actual emulator.
 
 ## Experiments
 
-A comparison runner keeps rewards, actions, PPO settings, and budgets fixed while
-changing the RND flag. It evaluates final policies and exports per-seed data and
-learning curves.
+To compare PPO with PPO + RND, the comparison runner keeps the base rewards,
+actions, PPO settings, and training budget the same. It saves results for each seed
+and plots learning curves.
 
 ```bash
 uv pip install -e '.[analysis]'
@@ -176,15 +202,14 @@ python -m src.compare --pilot --seeds 0 1 --episodes 3 \
   --report-dir results/my_pilot
 ```
 
-The [recorded pilot](results/pilot_stage1_1/README.md) ran two training seeds at
-2,048 transitions per method. Neither method cleared stage 1-1. This validates the
-comparison workflow, without establishing a learning advantage.
+The [first pilot](results/pilot_stage1_1/README.md) used two seeds and only 2,048
+transitions per method. Neither agent cleared stage 1-1. It was enough to check the
+comparison tools, but too short to say whether curiosity helps.
 
 ![PPO and RND pipeline pilot](results/pilot_stage1_1/comparison.png)
 
-See [the experiment protocol](docs/EXPERIMENTS.md) for a longer comparison and report
-commands. Training and video smoke checks validate the workflow. Benchmark claims
-require longer runs and evidence across training seeds.
+The next step is a longer comparison across several seeds. [The experiment
+protocol](docs/EXPERIMENTS.md) has the commands and evaluation setup for that run.
 
 Generated models stay under `runs/`. Small reports can be kept under `results/`.
 
